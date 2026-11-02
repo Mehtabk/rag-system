@@ -13,10 +13,14 @@ venv/
 .env.*
 !.env.example
 
-# Data (raw/processed docs, local indexes)
-data/
+# Data: ignore generated indexes and user-provided corpora, but KEEP the
+# sample fixtures that tests and the eval harness depend on.
+data/index/
+data/raw/
 *.index
 *.faiss
+!data/sample/
+!data/sample/**
 
 # Tooling
 .pytest_cache/
