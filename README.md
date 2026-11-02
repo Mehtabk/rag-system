@@ -4,129 +4,167 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-A production-grade **Retrieval-Augmented Generation** skeleton.
+**A reference implementation of production RAG architecture** — the structure around the
+model, not another model wrapper. Runs end-to-end with zero API keys, so you can read the
+architecture by running it.
 
-It encodes the architecture the 2026 best-practice consensus converged on:
+> Most RAG systems don't fail on the model. They fail on the structure around it. This repo
+> is that structure, made explicit and runnable.
 
-- **Two decoupled paths**, not one pipeline:
-  - **Data path** (offline): `ingest → chunk → embed → write`
-  - **Request path** (online): `gateway → embed query → retrieve → rerank → generate`
-- **Hybrid retrieval** (vector + keyword) followed by **cross-encoder reranking**.
-- **Guardrails** on both input (PII / injection) and output (faithfulness / grounding).
-- **First-class evals** (`evals/`) as a peer to `tests/`, with a CI regression gate.
-- **Everything behind interfaces** so each stage is independently testable and swappable.
-- **Observability** (tracing, latency, token cost) baked in.
+## Architecture
 
-This repo ships **working placeholder implementations** — an in-memory vector store, a
-hashing "embedder", and an echo generator — so the whole thing runs end-to-end with zero
-external services or API keys. Swap in real providers under each `providers/` folder.
+Two **decoupled paths** that share one vector store — the central idea of the design:
+
+- **Data path** (offline): `ingest → chunk → embed → store`
+- **Request path** (online): `query → input guardrail → hybrid retrieve → rerank → generate → output guardrail`
+
+![RAG system architecture: decoupled data and request paths sharing a vector store, with guardrails and an evals/CI gate](docs/architecture.png)
+
+Design principles it encodes (drawn from the 2026 production-RAG consensus):
+
+- **Hybrid retrieval** — dense vectors (semantic) fused with sparse keyword scoring, then a
+  reranking stage before generation.
+- **Guardrails as code-path gates** — input screening (PII / injection) *before* retrieval,
+  and an output grounding check *before* an answer is returned. A gate, not a prompt line.
+- **First-class evals** — `evals/` is a peer to `tests/`: retrieval + answer metrics wired
+  into a CI regression gate that fails the build when quality drops.
+- **Everything behind interfaces** — each stage (embeddings, vector store, reranker,
+  generation) is swappable via config, so providers change without touching callers.
+
+## Maturity: reference skeleton, honestly scoped
+
+This is a **runnable reference implementation**, not a deployed product. It ships
+dependency-free placeholders so it works offline out of the box; real backends plug into
+the same interfaces. Here is exactly what is implemented vs. stubbed:
+
+| Stage | Shipped & working | Interface ready (stub provided) |
+|-------|-------------------|---------------------------------|
+| Embeddings | `hashing` (no deps), `local` (sentence-transformers, offline) | `openai` |
+| Vector store | `memory` (in-memory, JSON-persisted) | `pinecone`, `pgvector`, `qdrant` |
+| Reranker | `identity` (passthrough) | `cohere`, cross-encoder |
+| Generation | `echo` (deterministic, extractive) | `anthropic`, `openai` |
+| Ingestion | `.txt` / `.md` directory loader | PDF / HTML / CSV, layout-aware parsing |
+| Guardrails | input (PII/injection) + output (lexical grounding) | NLI/LLM-based faithfulness judge |
+| Observability | span timing stub | OpenTelemetry spans, `/metrics`, token-cost |
+
+See the [Roadmap](#roadmap) for what turns this from a skeleton into a deployable system.
 
 ## Quickstart
 
 ```bash
-# 1. install (editable, with dev tools)
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # install (editable, with dev tools)
+make ingest                    # data path: index the sample corpus
+make serve                     # request path: API at http://localhost:8000/docs
+make eval                      # eval harness + regression gate
+make test                      # unit + integration tests
+```
 
-# 2. index the sample documents (data path)
-make ingest
+Ask a question once the server is running:
 
-# 3. serve the API (request path)
-make serve           # -> http://localhost:8000/docs
-
-# 4. ask a question
+```bash
 curl -s -X POST http://localhost:8000/query \
   -H 'content-type: application/json' \
   -d '{"question": "What is hybrid retrieval?"}' | python3 -m json.tool
-
-# 5. run the eval harness + regression gate
-make eval
-
-# 6. tests
-make test
 ```
 
-## Layout
+## Project layout
 
 ```
-config/            models, chunk sizes, top_k, prompts, logging — centralized
+config/            models, chunk sizes, top_k, prompts, logging — centralized, env-overridable
 src/rag/
-  ingestion/       loaders + layout-aware parsing + the offline index run   ─┐ data path
-  chunking/        splitters + metadata (source, section, ACLs)              │
-  embeddings/      provider-agnostic embedder + providers/                   │
-  vectorstore/     abstract store + providers (pinecone/pgvector/...)       ─┘
-  retrieval/       hybrid (vector+BM25) + rerank + query router             ─┐ request path
-  generation/      llm interface + providers + citation enforcement          │
-  guardrails/      input (PII/injection) + output (faithfulness) gates        │
-  pipelines/       index_pipeline.py / query_pipeline.py wire it together    ─┘
-  api/             FastAPI app, routes, pydantic schemas
-  observability/   tracing, metrics, logging
-  utils/           caching, shared helpers
-evals/             golden datasets, metrics, eval runner, CI regression gate
+  ingestion/       source loaders + the offline index run            ─┐ data path
+  chunking/        recursive splitter + chunk metadata                │
+  embeddings/      embedder interface + providers/ (hashing, local)   │
+  vectorstore/     store interface + providers/ (in-memory)          ─┘
+  retrieval/       hybrid search (vector + keyword) + rerank + router ─┐ request path
+  generation/      llm interface + providers/ + prompt assembly        │
+  guardrails/      input (PII/injection) + output (grounding) gates    │
+  pipelines/       index_pipeline.py / query_pipeline.py wire it up   ─┘
+  api/             FastAPI app, routes, pydantic schemas, security
+  observability/   span-timing stub (OTel-ready)
+  settings.py      env-driven runtime/security settings (secrets, CORS, limits)
+  config.py        YAML config loader with env overrides
+evals/             golden dataset, metrics, eval runner, CI regression gate
 tests/             unit + integration
-scripts/           reindex, seed
+scripts/           reindex
 ```
+
+## Configuration
+
+Two layers, by design:
+
+- **`config/config.yaml`** — non-secret tuning (providers, chunk size, `top_k`, thresholds).
+  Safe to commit.
+- **Environment (`RAG_*`, see `.env.example`)** — secrets and operational/security settings
+  (API keys, CORS, rate limits, admin token). Never committed.
+
+Selected values accept env overrides (e.g. `RAG_EMBEDDINGS_PROVIDER`) so CI can pin the
+dependency-free embedder while real use defaults to a semantic model.
 
 ## Choosing an embedder
 
-The embedder is swappable via `config/config.yaml` (`embeddings.provider`). Three options,
-trading off setup cost vs. quality:
+Swappable via `config/config.yaml` (`embeddings.provider`). The repo default is `local`
+(offline semantic); CI pins `hashing` for speed.
 
-| Provider | Config value | Deps | Keys | Quality | When to use |
-|----------|--------------|------|------|---------|-------------|
-| Hashing  | `hashing`    | none | no   | low (lexical only) | fast CI, unit tests, zero-footprint demos |
-| Local ST | `local`      | `.[local]` (torch) | no | good (real semantic) | offline dev, privacy-sensitive, no API budget |
-| OpenAI   | `openai`     | `.[providers]` | yes | best | production with an API budget |
+| Provider | Config value | Deps | API key | Quality | Use when |
+|----------|--------------|------|---------|---------|----------|
+| Hashing  | `hashing`    | none | no  | low (lexical) | CI, unit tests, zero-footprint demos |
+| Local    | `local`      | `.[local]` (torch) | no | good (semantic) | offline dev, privacy-sensitive, no API budget |
+| OpenAI   | `openai`     | `.[providers]` | yes | best | once the provider stub is implemented |
 
-**Local (recommended default for real use, offline):**
 ```bash
-pip install -e ".[local]"
-# config.yaml -> embeddings.provider: local, model: all-MiniLM-L6-v2, dim: 384
-python scripts/reindex.py      # re-embed the corpus with the new model
+pip install -e ".[local]"      # enable the offline semantic model
+python scripts/reindex.py      # re-embed the corpus after any embedder change
 ```
-First run downloads the model (~90 MB) to `~/.cache/huggingface`; afterwards it is fully
-offline. `all-MiniLM-L6-v2` is small and CPU-fast; swap `model:` for a larger one
-(`bge-base-en-v1.5`, `e5-large-v2`) if you want more accuracy.
 
-> Changing the embedder changes the vector dimensionality, so **always reindex** after a
-> switch — a store built with one model cannot be searched with another.
+> Changing the embedder changes vector dimensionality — **always reindex** after a switch.
+> A store built with one model cannot be searched with another.
 
 ## Security
 
 Hardened defaults, all configurable via `RAG_*` env vars (see `.env.example`):
 
-- **Deny-by-default CORS** — set `RAG_CORS_ORIGINS` to opt specific origins in.
-- **Docs off in production** — `/docs`, `/redoc`, `/openapi.json` disabled unless
-  `RAG_ENABLE_DOCS=true`.
+- **Deny-by-default CORS** — opt specific origins in via `RAG_CORS_ORIGINS`.
+- **Docs off in production** — `/docs`, `/redoc`, `/openapi.json` disabled unless `RAG_ENABLE_DOCS=true`.
 - **Per-IP rate limiting** (`RAG_RATE_LIMIT_*`) → `429` on abuse.
-- **Security headers** on every response (`X-Content-Type-Options`, `X-Frame-Options`,
-  CSP, HSTS over TLS).
-- **Bounded input** — questions over `RAG_MAX_QUESTION_CHARS` are rejected with `422`.
-- **Admin-gated `/ingest`** — requires `X-Admin-Token` (constant-time compared). In
-  production with no token configured, the endpoint is **disabled (fail closed)**.
-- **Input guardrail** screens queries for prompt injection / PII *before* retrieval;
-  **output guardrail** blocks ungrounded answers.
-- **Generic 500s** — internal errors are logged server-side, never leaked to clients.
-- **Secrets** come from the environment only (`SecretStr`), are never logged, and `.env`
-  is gitignored. Generate the admin token with:
-  `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
-- **Defensive ingestion/index I/O** — oversized files are skipped, symlinks escaping the
-  ingestion root are refused, and a corrupted index file degrades gracefully to empty.
+- **Security headers** on every response (`X-Content-Type-Options`, `X-Frame-Options`, CSP, HSTS over TLS).
+- **Bounded input** — questions over `RAG_MAX_QUESTION_CHARS` rejected with `422`.
+- **Admin-gated `/ingest`** — requires `X-Admin-Token` (constant-time compared); **fail-closed** in production when no token is set.
+- **Guardrails** — input injection/PII screening before retrieval; output grounding check before an answer ships.
+- **Generic 500s** — internal errors logged server-side, never leaked to clients.
+- **Secrets from env only** (`SecretStr`), never logged; `.env` is gitignored.
+  Generate an admin token: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+- **Defensive I/O** — oversized files skipped, symlinks escaping the ingestion root refused, corrupted index degrades to empty.
 
-## Swapping in real providers
+## Swapping in a real provider
 
-Each pluggable stage exposes an abstract base + a `providers/` folder:
+Each pluggable stage exposes an abstract interface and a `providers/` folder with a
+commented stub showing where a real backend plugs in:
 
-| Stage        | Interface                     | Example real provider           |
-|--------------|-------------------------------|---------------------------------|
-| Embeddings   | `embeddings/embedder.py`      | `providers/openai_embedder.py`  |
-| Vector store | `vectorstore/base.py`         | `providers/pinecone_store.py`   |
-| Generation   | `generation/llm.py`           | `providers/anthropic_llm.py`    |
+| Stage        | Interface                | Add a provider at              |
+|--------------|--------------------------|--------------------------------|
+| Embeddings   | `embeddings/embedder.py` | `embeddings/providers/`        |
+| Vector store | `vectorstore/base.py`    | `vectorstore/providers/`       |
+| Generation   | `generation/llm.py`      | `generation/providers/`        |
 
-Point `config/config.yaml` at the provider you want; nothing else changes.
+Implement the interface, add the branch to the stage's factory, point `config.yaml` at it —
+nothing else changes.
 
-> This is a skeleton for teaching/bootstrapping. For enterprise scale, split the index and
-> query paths into separately deployed services behind an async queue, add multi-tenant
-> isolation, a caching tier, and permission-aware retrieval.
+## Roadmap
+
+From reference skeleton toward deployable system:
+
+- [ ] Real provider pair (OpenAI embeddings + Anthropic generation) behind the stubs
+- [ ] Persistent vector store (pgvector / Qdrant)
+- [ ] Cross-encoder reranker
+- [ ] Streaming responses + embedding/retrieval caching
+- [ ] OpenTelemetry tracing + `/metrics` + token-cost accounting
+- [ ] Permission-aware (metadata-filtered) retrieval for multi-tenant use
+- [ ] PDF / HTML / CSV loaders with layout-aware parsing
+
+For enterprise scale, the index and request paths split into separately deployed services
+behind an async queue, with multi-tenant isolation, a caching tier, and permission-aware
+retrieval.
 
 ## License
 
