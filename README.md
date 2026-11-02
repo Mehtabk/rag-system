@@ -1,5 +1,9 @@
 # rag-system
 
+[![CI](https://github.com/Mehtabk/rag-system/actions/workflows/ci.yaml/badge.svg)](https://github.com/Mehtabk/rag-system/actions/workflows/ci.yaml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+
 A production-grade **Retrieval-Augmented Generation** skeleton.
 
 It encodes the architecture the 2026 best-practice consensus converged on:
@@ -123,3 +127,7 @@ Point `config/config.yaml` at the provider you want; nothing else changes.
 > This is a skeleton for teaching/bootstrapping. For enterprise scale, split the index and
 > query paths into separately deployed services behind an async queue, add multi-tenant
 > isolation, a caching tier, and permission-aware retrieval.
+
+## License
+
+MIT — see [LICENSE](./LICENSE). Built by [DeeplyAgentic](https://www.deeplyagentic.com).
