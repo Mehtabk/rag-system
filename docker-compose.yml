@@ -1,0 +1,16 @@
+# Local dev parity. The default skeleton needs no external services; when you
+# swap in a real vector DB, add it here (example: qdrant) and point config at it.
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - RAG_ENV=local
+      - LOG_LEVEL=INFO
+
+  # Example real vector store — uncomment and set vectorstore.provider accordingly.
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   ports:
+  #     - "6333:6333"

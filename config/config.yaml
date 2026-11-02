@@ -1,0 +1,38 @@
+# Central configuration. One place to tune the whole system — nothing hard-coded
+# in modules. Provider names select which implementation is loaded at runtime.
+
+embeddings:
+  provider: local         # hashing (no deps) | local (offline semantic) | openai
+  model: all-MiniLM-L6-v2
+  dim: 384
+
+vectorstore:
+  provider: memory         # memory (default) | pinecone | pgvector
+  collection: documents
+
+chunking:
+  strategy: recursive      # recursive | semantic
+  chunk_size: 800          # characters
+  chunk_overlap: 120
+
+retrieval:
+  top_k: 8                 # candidates pulled from hybrid search
+  hybrid_alpha: 0.5        # 0 = pure keyword (BM25), 1 = pure vector
+  rerank: true
+  rerank_provider: identity   # identity (default) | cohere | cross-encoder
+  rerank_top_n: 4          # passed to the generator after reranking
+
+generation:
+  provider: echo           # echo (default, no deps) | anthropic | openai
+  model: placeholder-1
+  temperature: 0.1
+  max_tokens: 512
+
+guardrails:
+  check_input: true        # PII / prompt-injection screening before retrieval
+  check_output: true       # faithfulness / grounding gate before returning
+  min_grounding_score: 0.3
+
+paths:
+  prompts_dir: config/prompts
+  data_dir: data

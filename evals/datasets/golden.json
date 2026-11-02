@@ -1,0 +1,17 @@
+[
+  {
+    "question": "What is hybrid retrieval?",
+    "expected_sources": ["hybrid_retrieval.md"],
+    "must_include": ["vector", "keyword"]
+  },
+  {
+    "question": "Why are guardrails implemented as gates instead of prompt instructions?",
+    "expected_sources": ["guardrails.md"],
+    "must_include": ["gate"]
+  },
+  {
+    "question": "Why does chunking matter for RAG quality?",
+    "expected_sources": ["chunking.md"],
+    "must_include": ["chunk"]
+  }
+]
