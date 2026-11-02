@@ -8,6 +8,12 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      # Pin the dependency-free embedder so CI stays fast, deterministic, and
+      # offline (no model download). Real use defaults to the local model.
+      RAG_EMBEDDINGS_PROVIDER: hashing
+      RAG_EMBEDDINGS_MODEL: local-hash-256
+      RAG_EMBEDDINGS_DIM: "256"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
